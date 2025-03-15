@@ -18,6 +18,7 @@ use std::{
 
 #[macro_use]
 extern crate rocket;
+mod objects;
 
 // #[get("/")]
 // fn index() -> RawHtml<&'static [u8]> {
