@@ -4,6 +4,7 @@ use super::track::Track;
 use rand::seq::SliceRandom;
 use rand::{SeedableRng, Rng};
 use rand::rngs::StdRng;
+use core::result::Result;
 
 pub struct TrackIterator {
     track: Track,
@@ -32,26 +33,27 @@ impl TrackIterator {
     }
 
     pub fn has_more(&self) -> bool {
-        self.track_queue.len() >= 1
+        !self.track_queue.is_empty()
     }
 
-    pub fn go_next(&mut self) {
-        let nx_track = self.get_next();
+    pub fn go_next(&mut self) -> Result<(), &'static str> {
+        let nx_track = self.get_next()?;
         self.track = nx_track;
+        Ok(())
     }
-
-    pub fn get_next(&mut self) -> Track {
-
+    
+    pub fn get_next(&mut self) -> Result<Track, &'static str> {
         if !self.has_more() {
-            panic!("No more tracks to play");
+            return Err("No more tracks to play");
         }
-
+    
         self.shuffle();
         let next_index = self.pick_next();
-
-        let nx_track= self.track_queue[next_index].clone();
+    
+        // Usando clone para obter um valor owned
+        let nx_track = self.track_queue[next_index].clone();
         self.track_queue.remove(next_index);
-        nx_track
+        Ok(nx_track)
     }
 
     fn shuffle(&mut self) {
