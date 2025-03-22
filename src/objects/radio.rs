@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map, HashMap};
 
 use rocket::time::Date;
 use super::{station::station::Station};
@@ -6,7 +6,35 @@ use super::{station::station::Station};
 struct Radio {
     stations: HashMap<String, Station>,
     seed: u64,
-    connections: i64
+    connections: i64,
+    _frequency: String
 }
 
+impl Radio {
 
+    fn new() -> Self {
+        Self {
+            stations: HashMap::new(),
+            seed,
+            connections: 0,
+            _frequency, 
+        }
+    }
+
+    fn determine_station() {
+        // recebe o endpoint aqui e aponta para o spawn correto
+    }
+
+    fn station_controller() {
+        // controla as threds das stations
+    }    
+
+    fn spawn_station(frequency: &str) {
+        // spawna a thread referente a stação da frequencia
+    }
+
+    fn set_frequency() {
+        // pega o endpoint e trata
+    }
+
+}
