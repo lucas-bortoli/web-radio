@@ -1,23 +1,22 @@
 use std::collections::{hash_map, HashMap};
 
+use rand::SeedableRng;
 use rocket::time::Date;
 use super::{station::station::Station};
 
 struct Radio {
-    stations: HashMap<String, Station>,
-    seed: u64,
-    connections: i64,
-    _frequency: String
+    pub stations: HashMap<String, Station>,
+    pub seed: u64,
+    pub connections: i64,
 }
 
 impl Radio {
 
-    fn new() -> Self {
+    fn new(seed: u64, ) -> Self {
         Self {
             stations: HashMap::new(),
             seed,
             connections: 0,
-            _frequency, 
         }
     }
 
