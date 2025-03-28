@@ -8,7 +8,7 @@ struct Radio {
     pub stations: HashMap<String, Station>,
     pub seed: u64,
     pub connections: i64,
-    pub _frequency: String,
+    pub _frequency: String
 }
 
 impl Radio {
