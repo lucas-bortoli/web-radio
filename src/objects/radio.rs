@@ -1,6 +1,5 @@
-use std::collections::{hash_map, HashMap};
+use std::collections::HashMap;
 
-use rocket::time::Date;
 use super::{station::station::Station};
 
 struct Radio {
@@ -12,12 +11,12 @@ struct Radio {
 
 impl Radio {
 
-    fn new() -> Self {
+    fn new(seed: u64, _frequency: String) -> Self {
         Self {
             stations: HashMap::new(),
             seed,
             connections: 0,
-            _frequency, 
+            _frequency,
         }
     }
 
