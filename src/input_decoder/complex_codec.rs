@@ -17,8 +17,8 @@ pub struct ComplexCodecFile {
     reader: BufReader<ChildStdout>,
 }
 
-impl AudioFile for ComplexCodecFile {
-    fn new(file_path: String) -> ComplexCodecFile {
+impl ComplexCodecFile {
+    pub fn new(file_path: String) -> ComplexCodecFile {
         let file = File::open(file_path.clone()).expect("Failed to open file");
         let file_size = file.metadata().unwrap().len();
 
@@ -48,7 +48,9 @@ impl AudioFile for ComplexCodecFile {
             reader,
         }
     }
+}
 
+impl AudioFile for ComplexCodecFile {
     fn audio_file_path(&self) -> String {
         self.file_path.clone()
     }

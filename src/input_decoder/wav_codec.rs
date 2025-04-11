@@ -19,8 +19,8 @@ pub struct WavCodecFile {
     audio_buffer: Box<ReadBuffer>,
 }
 
-impl AudioFile for WavCodecFile {
-    fn new(file_path: String) -> WavCodecFile {
+impl WavCodecFile {
+    pub fn new(file_path: String) -> Self {
         let mut file = File::open(file_path.clone())
             .unwrap_or_else(|_| panic!("File {} is not readable?", file_path));
         let file_size = file.metadata().expect("File has no metadata?").len();
@@ -39,7 +39,9 @@ impl AudioFile for WavCodecFile {
             audio_buffer: Box::new([0u8; READ_BUFFER_SIZE]),
         }
     }
+}
 
+impl AudioFile for WavCodecFile {
     fn audio_file_path(&self) -> String {
         self.file_path.clone()
     }

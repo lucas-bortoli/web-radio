@@ -1,8 +1,6 @@
-pub trait AudioFile: Iterator {
-    fn new(file_path: String) -> Self;
-    fn audio_file_path(&self) -> String;
-    fn audio_file_size_bytes(&self) -> u64;
-}
+use std::path::Path;
+
+use super::{complex_codec::ComplexCodecFile, wav_codec::WavCodecFile};
 
 pub const CHANNEL_COUNT: u32 = 2;
 pub const SAMPLE_RATE: u32 = 44100;
@@ -19,6 +17,22 @@ pub struct AudioPacket {
      * O buffer de áudio, formato PCM, com as especificações acima.
      */
     pub buffer: Vec<u8>,
+}
+
+pub trait AudioFile: Iterator<Item = AudioPacket> {
+    fn audio_file_path(&self) -> String;
+    fn audio_file_size_bytes(&self) -> u64;
+}
+
+/// Retorna um iterator de `AudioPacket`s para você consumir, bb
+pub fn open_input_file_strategy(file_path: String) -> Box<dyn AudioFile> {
+    match Path::new(&file_path).extension() {
+        Some(str) => match str.to_ascii_lowercase().to_str().unwrap() {
+            "wav" => Box::new(WavCodecFile::new(file_path)), // para wavs
+            _ => Box::new(ComplexCodecFile::new(file_path)), // ...todos os outros codecs
+        },
+        None => panic!("File {} has no extension", file_path),
+    }
 }
 
 /// Converte o número de bytes de um buffer PCM para sua duração em segundos
