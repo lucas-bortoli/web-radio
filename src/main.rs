@@ -50,17 +50,21 @@ fn main() {
     let (rx, tx) = sync::broadcast::channel::<ConsumerPacket>(8);
     let station_subscribers = Arc::new(RwLock::new(vec![rx.clone()]));
     let mut output =
-        output_encoder::AudioEncoder::new(OutputCodec::Mp3, station_subscribers.clone());
+        output_encoder::AudioEncoder::new(OutputCodec::Opus128kbps, station_subscribers.clone());
 
     loop {
-        let input =
-            input_audio_file::open_input_file_strategy("./CorruptSaveLonelyHeart.mp3".to_string());
+        let input = input_audio_file::open_input_file_strategy(
+            "./Blank Banshee - Gunshots.mp3".to_string(),
+        );
 
         for packet in input {
             println!("Áudio: {:.02}s", packet.audio_length);
             //println!("{:?}", packet.buffer);
             output.push_audio_packet(&packet);
-            // thread::sleep(Duration::from_millis((packet.audio_length * 1000.0) as u64));
+
+            thread::sleep(Duration::from_nanos(
+                (packet.audio_length * 1000_000_000.0) as u64,
+            ));
         }
     }
 }
