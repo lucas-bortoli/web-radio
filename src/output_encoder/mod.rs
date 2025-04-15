@@ -1,11 +1,11 @@
+use bytes::Bytes;
+use rocket::tokio::sync::broadcast;
 use std::{
     io::{BufReader, BufWriter, Read, Write},
     process::{ChildStdin, Command, Stdio},
     sync::{Arc, RwLock},
     thread,
 };
-
-use rocket::tokio::sync::broadcast;
 
 use crate::input_decoder::input_audio_file::AudioPacket;
 
@@ -51,7 +51,7 @@ fn ffmpeg_args(output_codec: OutputCodec) -> Vec<String> {
     return args.iter().map(|f| f.to_string()).collect();
 }
 
-pub type ConsumerPacket = Box<Vec<u8>>;
+pub type ConsumerPacket = Bytes;
 type Consumer = broadcast::Sender<ConsumerPacket>;
 type ProtectedConsumerVec = Arc<RwLock<Vec<Consumer>>>;
 
@@ -93,9 +93,14 @@ impl AudioEncoder {
                         1.. => {
                             println!("encoder: {} bytes retornados do encoder!", n);
 
-                            let consumers_guard = consumers_encoder.read().unwrap();
-                            for consumer in consumers_guard.to_vec() {
-                                if let Err(e) = consumer.send(Box::new(buf[..n].to_vec())) {
+                            // não é exatamente zero-copy, mas sim "one-copy"
+                            // uma vez que alocamos esse Bytes, ele é reference-counted, igual o Arc
+                            // ao transmití-lo pelo tokio::sync::broadcast::Sender ele não vai fazer novas cópias de memória
+                            // então pagamos um custo fixo, uma vez só
+                            let packet = Bytes::copy_from_slice(&buf[..n]);
+
+                            for consumer in consumers_encoder.read().unwrap().to_vec() {
+                                if let Err(e) = consumer.send(packet.clone()) {
                                     eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
                                 }
                             }
