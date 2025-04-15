@@ -1,7 +1,7 @@
 use std::{
     io::{BufReader, BufWriter, Read, Write},
     process::{ChildStdin, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     thread,
 };
 
@@ -25,9 +25,9 @@ pub enum OutputCodec {
     Opus,
 }
 
-type ConsumerPacket = Box<Vec<u8>>;
-type Consumer = broadcast::WeakSender<ConsumerPacket>;
-type ProtectedConsumerVec = Arc<Mutex<Vec<Consumer>>>;
+pub type ConsumerPacket = Box<Vec<u8>>;
+type Consumer = broadcast::Sender<ConsumerPacket>;
+type ProtectedConsumerVec = Arc<RwLock<Vec<Consumer>>>;
 
 // singleton - um por estação
 pub struct AudioEncoder {
@@ -55,6 +55,7 @@ impl AudioEncoder {
                 },
                 "-", // stdout como output pro ffmpeg
             ])
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -69,10 +70,10 @@ impl AudioEncoder {
         thread::spawn(move || {
             println!("encoder: Thread de consumidor de áudio iniciada.");
 
-            let mut buf = Vec::<u8>::new();
+            let mut buf = vec![0u8; 32768];
             loop {
                 let n = stdout_reader
-                    .read(buf.as_mut())
+                    .read(&mut buf)
                     .expect("encoder: Ler stdout do encoder falhou - processo crashou?");
 
                 match n {
@@ -80,12 +81,10 @@ impl AudioEncoder {
                     1.. => {
                         println!("encoder: {} bytes retornados do encoder!", n);
 
-                        let potential_consumers = encoder_consumers.lock().unwrap().to_vec();
-                        for potential_consumer in potential_consumers {
-                            if let Some(consumer) = potential_consumer.upgrade() {
-                                if let Err(e) = consumer.send(Box::new(buf[..n].to_vec())) {
-                                    eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
-                                }
+                        let consumers_guard = encoder_consumers.read().unwrap();
+                        for consumer in consumers_guard.to_vec() {
+                            if let Err(e) = consumer.send(Box::new(buf[..n].to_vec())) {
+                                eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
                             }
                         }
                     }
@@ -99,7 +98,7 @@ impl AudioEncoder {
         }
     }
 
-    pub fn push_audio_packet(&mut self, packet: AudioPacket) {
+    pub fn push_audio_packet(&mut self, packet: &AudioPacket) {
         self.encoder_in
             .write(&packet.buffer)
             .expect("encoder: A fila do ffmpeg está cheia?");
