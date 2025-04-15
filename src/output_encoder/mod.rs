@@ -20,9 +20,35 @@ pub const OUTPUT_BYTE_DEPTH: u32 = 2; //16bits
 pub const MAX_STATION_LISTENERS: usize = 64; // quantos players podem ouvir essa estação de uma vez?
 
 pub enum OutputCodec {
-    Mp3,
-    OggVorbis,
-    Opus,
+    Mp3_64kbps,
+    Ogg96kbps,
+    Opus128kbps,
+}
+
+fn ffmpeg_args(output_codec: OutputCodec) -> Vec<String> {
+    let sample_rate = INPUT_SAMPLE_RATE.to_string();
+    let channel_count = INPUT_CHANNEL_COUNT.to_string();
+
+    let mut args = vec![
+        "-f",
+        "s16le",
+        "-ar",
+        &sample_rate,
+        "-ac",
+        &channel_count,
+        "-i",
+        "-", // stdin como input pro ffmpeg
+    ];
+
+    args.append(&mut match output_codec {
+        OutputCodec::Mp3_64kbps => vec!["-b:a", "64k", "-f", "mp3"],
+        OutputCodec::Ogg96kbps => vec!["-b:a", "96k", "-f", "ogg"],
+        OutputCodec::Opus128kbps => vec!["-c:a", "libopus", "-b:a", "128k", "-f", "opus"],
+    });
+
+    args.push("-"); // stdout como output pro ffmpeg
+
+    return args.iter().map(|f| f.to_string()).collect();
 }
 
 pub type ConsumerPacket = Box<Vec<u8>>;
@@ -33,68 +59,59 @@ type ProtectedConsumerVec = Arc<RwLock<Vec<Consumer>>>;
 pub struct AudioEncoder {
     encoder_in: BufWriter<ChildStdin>,
     consumers: ProtectedConsumerVec,
+    _child: std::process::Child,
 }
 
 impl AudioEncoder {
     pub fn new(output_codec: OutputCodec, consumers: ProtectedConsumerVec) -> AudioEncoder {
+        let args: Vec<String> = ffmpeg_args(output_codec);
+
+        println!("encoder: Parâmetros ffmpeg: {:?}", args);
+
         let mut child = Command::new("ffmpeg")
-            .args(&[
-                "-f",
-                "s16le",
-                "-ar",
-                &INPUT_SAMPLE_RATE.to_string(),
-                "-ac",
-                &INPUT_CHANNEL_COUNT.to_string(),
-                "-i",
-                "-", // stdin como input pro ffmpeg
-                "-f",
-                match output_codec {
-                    OutputCodec::Mp3 => "mp3",
-                    OutputCodec::OggVorbis => "ogg",
-                    OutputCodec::Opus => "opus",
-                },
-                "-", // stdout como output pro ffmpeg
-            ])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
             .expect("encoder: Falha ao spawnar o ffmpeg");
 
-        let stdin = child.stdin.take().expect("encoder: Falha ao ler stdin");
-        let stdin_writer = BufWriter::new(stdin);
-        let stdout = child.stdout.take().expect("encoder: Falha ao ler stdout");
-        let mut stdout_reader = BufReader::new(stdout);
+        if let Some(stdout) = child.stdout.take() {
+            let consumers_encoder = consumers.clone();
+            let mut stdout_reader = BufReader::new(stdout);
+            thread::spawn(move || {
+                println!("encoder: Thread de consumidor de áudio iniciada.");
 
-        let encoder_consumers = consumers.clone();
-        thread::spawn(move || {
-            println!("encoder: Thread de consumidor de áudio iniciada.");
+                let mut buf = vec![0u8; 32768];
+                loop {
+                    let n = stdout_reader
+                        .read(&mut buf)
+                        .expect("encoder: Ler stdout do encoder falhou - processo crashou?");
 
-            let mut buf = vec![0u8; 32768];
-            loop {
-                let n = stdout_reader
-                    .read(&mut buf)
-                    .expect("encoder: Ler stdout do encoder falhou - processo crashou?");
+                    match n {
+                        0 => panic!("encoder: Stdout finalizou, estação acabou!"),
+                        1.. => {
+                            println!("encoder: {} bytes retornados do encoder!", n);
 
-                match n {
-                    0 => panic!("encoder: Stdout finalizou, estação acabou!"),
-                    1.. => {
-                        println!("encoder: {} bytes retornados do encoder!", n);
-
-                        let consumers_guard = encoder_consumers.read().unwrap();
-                        for consumer in consumers_guard.to_vec() {
-                            if let Err(e) = consumer.send(Box::new(buf[..n].to_vec())) {
-                                eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
+                            let consumers_guard = consumers_encoder.read().unwrap();
+                            for consumer in consumers_guard.to_vec() {
+                                if let Err(e) = consumer.send(Box::new(buf[..n].to_vec())) {
+                                    eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
+
+        let stdin = child.stdin.take().expect("encoder: Falha ao ler stdin");
+        let stdin_writer = BufWriter::new(stdin);
 
         AudioEncoder {
             encoder_in: stdin_writer,
             consumers,
+            _child: child,
         }
     }
 
