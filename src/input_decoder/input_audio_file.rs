@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use bytes::Bytes;
+
 use super::{complex_codec::ComplexCodecFile, wav_codec::WavCodecFile};
 
 pub const CHANNEL_COUNT: u32 = 2;
@@ -16,7 +18,7 @@ pub struct AudioPacket {
     /**
      * O buffer de áudio, formato PCM, com as especificações acima.
      */
-    pub buffer: Vec<u8>,
+    pub buffer: Bytes,
 }
 
 pub trait AudioFile: Iterator<Item = AudioPacket> {
