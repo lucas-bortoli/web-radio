@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use rocket::tokio::sync::broadcast;
+use rocket::tokio::sync::broadcast::{self, Sender};
 use std::{
     io::{BufReader, BufWriter, Read, Write},
     process::{ChildStdin, Command, Stdio},
@@ -53,17 +53,16 @@ fn ffmpeg_args(output_codec: OutputCodec) -> Vec<String> {
 
 pub type ConsumerPacket = Bytes;
 type Consumer = broadcast::Sender<ConsumerPacket>;
-type ProtectedConsumerVec = Arc<RwLock<Vec<Consumer>>>;
+pub type ProtectedConsumerVec = Arc<RwLock<Vec<Consumer>>>;
 
 // singleton - um por estação
 pub struct AudioEncoder {
     encoder_in: BufWriter<ChildStdin>,
-    consumers: ProtectedConsumerVec,
     _child: std::process::Child,
 }
 
 impl AudioEncoder {
-    pub fn new(output_codec: OutputCodec, consumers: ProtectedConsumerVec) -> AudioEncoder {
+    pub fn new(output_codec: OutputCodec, tx: Sender<Bytes>) -> AudioEncoder {
         let args: Vec<String> = ffmpeg_args(output_codec);
 
         println!("encoder: Parâmetros ffmpeg: {:?}", args);
@@ -77,7 +76,6 @@ impl AudioEncoder {
             .expect("encoder: Falha ao spawnar o ffmpeg");
 
         if let Some(stdout) = child.stdout.take() {
-            let consumers_encoder = consumers.clone();
             let mut stdout_reader = BufReader::new(stdout);
             thread::spawn(move || {
                 println!("encoder: Thread de consumidor de áudio iniciada.");
@@ -99,10 +97,8 @@ impl AudioEncoder {
                             // então pagamos um custo fixo, uma vez só
                             let packet = Bytes::copy_from_slice(&buf[..n]);
 
-                            for consumer in consumers_encoder.read().unwrap().to_vec() {
-                                if let Err(e) = consumer.send(packet.clone()) {
-                                    eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
-                                }
+                            if let Err(e) = tx.send(packet) {
+                                //eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
                             }
                         }
                     }
@@ -115,7 +111,6 @@ impl AudioEncoder {
 
         AudioEncoder {
             encoder_in: stdin_writer,
-            consumers,
             _child: child,
         }
     }
