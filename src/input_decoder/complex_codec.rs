@@ -4,6 +4,8 @@ use std::{
     process::{ChildStdout, Command, Stdio},
 };
 
+use bytes::Bytes;
+
 use crate::input_decoder::input_audio_file::calculate_buffer_length;
 
 use super::input_audio_file::{AudioFile, AudioPacket, BYTE_DEPTH, CHANNEL_COUNT, SAMPLE_RATE};
@@ -77,7 +79,7 @@ impl Iterator for ComplexCodecFile {
 
         return Some(AudioPacket {
             audio_length,
-            buffer: buffer[..n].to_vec(),
+            buffer: Bytes::copy_from_slice(&buffer[..n]),
         });
     }
 }

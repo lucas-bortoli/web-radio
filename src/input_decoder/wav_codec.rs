@@ -4,6 +4,8 @@ use std::{
     ops::DerefMut,
 };
 
+use bytes::Bytes;
+
 use super::input_audio_file::{
     calculate_buffer_length, AudioFile, AudioPacket, BYTE_DEPTH, CHANNEL_COUNT, SAMPLE_RATE,
 };
@@ -67,7 +69,7 @@ impl Iterator for WavCodecFile {
 
         let packet = AudioPacket {
             audio_length: calculate_buffer_length(bytes_read as u32),
-            buffer: self.audio_buffer[..bytes_read].to_vec(),
+            buffer: Bytes::copy_from_slice(&self.audio_buffer[..bytes_read]),
         };
 
         return Some(packet);
