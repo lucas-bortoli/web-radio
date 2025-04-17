@@ -24,15 +24,18 @@ pub struct WavCodecFile {
 impl WavCodecFile {
     pub fn new(file_path: String) -> Self {
         let mut file = File::open(file_path.clone())
-            .unwrap_or_else(|_| panic!("File {} is not readable?", file_path));
-        let file_size = file.metadata().expect("File has no metadata?").len();
+            .unwrap_or_else(|_| panic!("wav_codec: File {} is not readable?", file_path));
+        let file_size = file
+            .metadata()
+            .expect("wav_codec: File has no metadata?")
+            .len();
 
         // TODO: validar headers do wav, ver se o sample rate e outros parâmetros do arquivo são equivalentes ao contrato em input_audio_file
         // TODO: (...validar aqui...)
 
         // skipar header WAV, para não ler como se fosse áudio
         file.seek(std::io::SeekFrom::Start(44))
-            .expect("Skipping WAV header failed");
+            .expect("wav_codec: Skipping WAV header failed");
 
         WavCodecFile {
             file_path,
@@ -60,10 +63,10 @@ impl Iterator for WavCodecFile {
         let bytes_read = self
             .file
             .read(self.audio_buffer.deref_mut())
-            .expect("Audio file is unreadable");
+            .expect("wav_codec: Audio file is unreadable");
 
         if bytes_read == 0 {
-            println!("EOF.");
+            println!("wav_codec: EOF.");
             return None;
         }
 

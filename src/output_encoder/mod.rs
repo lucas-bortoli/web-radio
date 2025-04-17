@@ -1,9 +1,9 @@
 use bytes::Bytes;
-use rocket::tokio::sync::broadcast::{self, Sender};
 use std::{
+    collections::HashMap,
     io::{BufReader, BufWriter, Read, Write},
     process::{ChildStdin, Command, Stdio},
-    sync::{Arc, RwLock},
+    sync::{mpsc, Arc, RwLock},
     thread,
 };
 
@@ -52,17 +52,19 @@ fn ffmpeg_args(output_codec: OutputCodec) -> Vec<String> {
 }
 
 pub type ConsumerPacket = Bytes;
-type Consumer = broadcast::Sender<ConsumerPacket>;
-pub type ProtectedConsumerVec = Arc<RwLock<Vec<Consumer>>>;
+pub type ConsumerMap = Arc<RwLock<HashMap<ClientId, mpsc::Sender<Bytes>>>>;
+
+pub type ClientId = uuid::Uuid;
 
 // singleton - um por estação
 pub struct AudioEncoder {
     encoder_in: BufWriter<ChildStdin>,
     _child: std::process::Child,
+    consumer_map: Arc<RwLock<HashMap<ClientId, mpsc::Sender<Bytes>>>>, // TODO não armazenar isso no encoder, mas em outro lugar...
 }
 
 impl AudioEncoder {
-    pub fn new(output_codec: OutputCodec, tx: Sender<Bytes>) -> AudioEncoder {
+    pub fn new(output_codec: OutputCodec, consumer_map: ConsumerMap) -> AudioEncoder {
         let args: Vec<String> = ffmpeg_args(output_codec);
 
         println!("encoder: Parâmetros ffmpeg: {:?}", args);
@@ -77,10 +79,11 @@ impl AudioEncoder {
 
         if let Some(stdout) = child.stdout.take() {
             let mut stdout_reader = BufReader::new(stdout);
+            let consumer_map_encoder = consumer_map.clone();
             thread::spawn(move || {
                 println!("encoder: Thread de consumidor de áudio iniciada.");
 
-                let mut buf = vec![0u8; 32768];
+                let mut buf = vec![0u8; 8192];
                 loop {
                     let n = stdout_reader
                         .read(&mut buf)
@@ -89,16 +92,25 @@ impl AudioEncoder {
                     match n {
                         0 => panic!("encoder: Stdout finalizou, estação acabou!"),
                         1.. => {
-                            println!("encoder: {} bytes retornados do encoder!", n);
-
                             // não é exatamente zero-copy, mas sim "one-copy"
                             // uma vez que alocamos esse Bytes, ele é reference-counted, igual o Arc
                             // ao transmití-lo pelo tokio::sync::broadcast::Sender ele não vai fazer novas cópias de memória
                             // então pagamos um custo fixo, uma vez só
                             let packet = Bytes::copy_from_slice(&buf[..n]);
 
-                            if let Err(e) = tx.send(packet) {
-                                //eprintln!("encoder: Falha ao enviar para consumer: {:?}", e);
+                            let mut disconnected_clients = vec![];
+
+                            for (client_id, tx) in consumer_map_encoder.read().unwrap().iter() {
+                                if let Err(e) = tx.send(packet.clone()) {
+                                    eprintln!("encoder: falha ao enviar para {}: {}", client_id, e);
+                                    disconnected_clients.push(client_id.clone());
+                                }
+                            }
+
+                            let mut encoder_write_guard = consumer_map_encoder.write().unwrap();
+                            for client_id in disconnected_clients {
+                                eprintln!("encoder: removendo {} da transmissão!", client_id);
+                                encoder_write_guard.remove(&client_id);
                             }
                         }
                     }
@@ -111,11 +123,12 @@ impl AudioEncoder {
 
         AudioEncoder {
             encoder_in: stdin_writer,
+            consumer_map,
             _child: child,
         }
     }
 
-    pub fn push_audio_packet(&mut self, packet: &AudioPacket) {
+    pub fn push_audio_packet(&mut self, packet: AudioPacket) {
         self.encoder_in
             .write(&packet.buffer)
             .expect("encoder: A fila do ffmpeg está cheia?");
