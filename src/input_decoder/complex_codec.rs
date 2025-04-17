@@ -21,7 +21,7 @@ pub struct ComplexCodecFile {
 
 impl ComplexCodecFile {
     pub fn new(file_path: String) -> ComplexCodecFile {
-        let file = File::open(file_path.clone()).expect("Failed to open file");
+        let file = File::open(file_path.clone()).expect("complex_codec_file: Failed to open file");
         let file_size = file.metadata().unwrap().len();
 
         let mut child = Command::new("ffmpeg")
@@ -39,9 +39,12 @@ impl ComplexCodecFile {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .expect("Falha ao spawnar o ffmpeg");
+            .expect("complex_codec_file: Falha ao spawnar o ffmpeg");
 
-        let stdout = child.stdout.take().expect("Falha ao ler stdout");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("complex_codec_file: Falha ao ler stdout");
         let reader = BufReader::new(stdout);
 
         ComplexCodecFile {
@@ -67,15 +70,17 @@ impl Iterator for ComplexCodecFile {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut buffer = [0u8; FFMPEG_STDOUT_BUFFER_SIZE as usize];
-        let n = self.reader.read(&mut buffer).expect("Falha ao ler bytes");
+        let n = self
+            .reader
+            .read(&mut buffer)
+            .expect("complex_codec_file: Falha ao ler bytes");
 
         if n == 0 {
-            println!("EOF");
+            println!("complex_codec_file: EOF.");
             return None;
         }
 
         let audio_length = calculate_buffer_length(n as u32);
-        println!("{} bytes lidos ({:.4}s)", n, audio_length);
 
         return Some(AudioPacket {
             audio_length,
