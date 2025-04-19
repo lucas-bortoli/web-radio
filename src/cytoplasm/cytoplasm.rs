@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{mpsc, Arc, Mutex},
-    thread::{self, JoinHandle},
+    thread::{self},
     time::{Duration, Instant},
 };
 
@@ -10,17 +10,14 @@ use rocket::{http::ContentType, response::stream::ByteStream};
 
 use crate::{
     input_decoder::input_audio_file::{self, AudioPacket},
-    output_encoder::{AudioEncoder, OutputCodec},
-    NULL_MP3_FRAME,
+    output_encoder::{
+        audio_encoder::{AudioEncoder, OutputCodec},
+        null_frames::get_null_frame,
+    },
 };
 
 pub struct Cytoplasm {
-    decoder_thread_handle: JoinHandle<()>,
-    encoder_thread_handle: JoinHandle<()>,
-
     encoders: Arc<Mutex<HashMap<OutputCodec, AudioEncoder>>>,
-
-    buffer: Arc<Mutex<VecDeque<AudioPacket>>>,
 }
 
 impl Cytoplasm {
@@ -43,7 +40,7 @@ impl Cytoplasm {
         const FUCKALL_DURATION: Duration = Duration::from_millis(5);
 
         let decoder_buffer = shared_buffer.clone();
-        let decoder_thread_handle = thread::spawn(move || loop {
+        thread::spawn(move || loop {
             let file = input_audio_file::open_input_file_strategy(
                 "./FlintNSteelRadio/Billy Walker/Billy Walker - Charlie's Shoes - Single Version.mp3".to_string(),
             );
@@ -76,7 +73,7 @@ impl Cytoplasm {
 
         let encoder_encodervec = encoders.clone();
         let encoder_buffer = shared_buffer.clone();
-        let encoder_thread_handle = thread::spawn(move || loop {
+        thread::spawn(move || loop {
             fn block_until_buffer_full(buffer: &Arc<Mutex<VecDeque<AudioPacket>>>) {
                 // fazer porra nenhuma até o buffer estar cheio
                 loop {
@@ -138,12 +135,7 @@ impl Cytoplasm {
             }
         });
 
-        return Cytoplasm {
-            buffer: shared_buffer,
-            encoders,
-            decoder_thread_handle,
-            encoder_thread_handle,
-        };
+        return Cytoplasm { encoders };
     }
 
     pub fn create_output_stream(
@@ -161,10 +153,11 @@ impl Cytoplasm {
 
         stream.unwrap().register_consumer(tx);
 
+        let codec_owned = codec.to_owned();
         Ok((
             ContentType::new("audio", "mpeg"),
             ByteStream! {
-                yield NULL_MP3_FRAME.to_vec();
+                yield get_null_frame(&codec_owned).to_vec();
                 eprintln!("server: Frame MP3 null enviado");
 
                 'receive: loop {
