@@ -3,9 +3,13 @@ use std::{
     collections::HashMap,
     io::{BufReader, BufWriter, Read, Write},
     process::{ChildStdin, Command, Stdio},
-    sync::{mpsc, Arc, RwLock},
+    sync::{
+        mpsc::{self, Sender},
+        Arc, RwLock,
+    },
     thread,
 };
+use uuid::Uuid;
 
 use crate::input_decoder::input_audio_file::AudioPacket;
 
@@ -19,13 +23,14 @@ pub const OUTPUT_BYTE_DEPTH: u32 = 2; //16bits
 
 pub const MAX_STATION_LISTENERS: usize = 64; // quantos players podem ouvir essa estação de uma vez?
 
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum OutputCodec {
     Mp3_64kbps,
     Ogg96kbps,
     Opus128kbps,
 }
 
-fn ffmpeg_args(output_codec: OutputCodec) -> Vec<String> {
+fn ffmpeg_args(output_codec: &OutputCodec) -> Vec<String> {
     let sample_rate = INPUT_SAMPLE_RATE.to_string();
     let channel_count = INPUT_CHANNEL_COUNT.to_string();
 
@@ -52,20 +57,21 @@ fn ffmpeg_args(output_codec: OutputCodec) -> Vec<String> {
 }
 
 pub type ConsumerPacket = Bytes;
-pub type ConsumerMap = Arc<RwLock<HashMap<ClientId, mpsc::Sender<Bytes>>>>;
-
-pub type ClientId = uuid::Uuid;
+type SinkMap = Arc<RwLock<HashMap<SinkId, mpsc::Sender<Bytes>>>>;
+type SinkId = uuid::Uuid;
 
 // singleton - um por estação
 pub struct AudioEncoder {
     encoder_in: BufWriter<ChildStdin>,
-    _child: std::process::Child,
-    consumer_map: Arc<RwLock<HashMap<ClientId, mpsc::Sender<Bytes>>>>, // TODO não armazenar isso no encoder, mas em outro lugar...
+    child: std::process::Child,
+    consumers: Arc<RwLock<HashMap<SinkId, mpsc::Sender<Bytes>>>>, // TODO não armazenar isso no encoder, mas em outro lugar...
 }
 
 impl AudioEncoder {
-    pub fn new(output_codec: OutputCodec, consumer_map: ConsumerMap) -> AudioEncoder {
-        let args: Vec<String> = ffmpeg_args(output_codec);
+    pub fn new(output_codec: OutputCodec) -> AudioEncoder {
+        let consumers: SinkMap = Arc::new(RwLock::new(HashMap::new()));
+
+        let args: Vec<String> = ffmpeg_args(&output_codec);
 
         println!("encoder: Parâmetros ffmpeg: {:?}", args);
 
@@ -79,7 +85,7 @@ impl AudioEncoder {
 
         if let Some(stdout) = child.stdout.take() {
             let mut stdout_reader = BufReader::new(stdout);
-            let consumer_map_encoder = consumer_map.clone();
+            let consumer_map_encoder = consumers.clone();
             thread::spawn(move || {
                 println!("encoder: Thread de consumidor de áudio iniciada.");
 
@@ -123,8 +129,8 @@ impl AudioEncoder {
 
         AudioEncoder {
             encoder_in: stdin_writer,
-            consumer_map,
-            _child: child,
+            consumers,
+            child: child,
         }
     }
 
@@ -136,5 +142,19 @@ impl AudioEncoder {
         // bypass do buffer do stdin; manda direto pro ffmpeg, já que áudio é em real-time e talvez não seja legal ter esse comportamento de buffering
         // ignoramos o Result propositalmente, não há nenhuma ação cabível a ser tomada se o buffer de stdin não pode ser flushado - meio que não importa
         let _ = self.encoder_in.flush();
+    }
+
+    pub fn register_consumer(&self, consumer: Sender<Bytes>) {
+        let receiver_id = Uuid::new_v4();
+        let mut consumers = self.consumers.write().unwrap();
+        consumers.insert(receiver_id, consumer);
+    }
+}
+
+impl Drop for AudioEncoder {
+    fn drop(&mut self) {
+        self.child
+            .kill()
+            .expect("encoder: ffmpeg não pôde ser fechado");
     }
 }
