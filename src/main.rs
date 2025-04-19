@@ -1,16 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{mpsc, Arc, RwLock},
-};
+use std::collections::HashMap;
 
-use bytes::Bytes;
 use cytoplasm::cytoplasm::Cytoplasm;
-use output_encoder::{ConsumerMap, OutputCodec};
+use output_encoder::OutputCodec;
 use rocket::{
     http::ContentType,
     response::{content::RawHtml, stream::ByteStream},
 };
-use uuid::Uuid;
 
 pub mod cytoplasm;
 pub mod input_decoder;
@@ -45,48 +40,28 @@ fn index() -> RawHtml<&'static [u8]> {
 /// `ffmpeg -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -acodec libmp3lame -ab 128k -ac 2 -ar 44100 -t 0.02 -vn -sn -f mp3 - | head -c 1472 > mp3_null_frame.bin`
 const NULL_MP3_FRAME: &[u8; 879] = include_bytes!("./mp3_null_frame.bin");
 
+type StationMap = HashMap<String, Cytoplasm>;
+
 #[get("/station")]
-fn station(state: &rocket::State<ConsumerMap>) -> (ContentType, ByteStream![Vec<u8>]) {
-    let client_id = Uuid::new_v4();
-    let (tx, rx) = mpsc::channel::<Bytes>();
+fn station_endpoint(state: &rocket::State<StationMap>) -> (ContentType, ByteStream![Vec<u8>]) {
+    let station = state.get("flintnsteel").unwrap();
 
-    let mut consumer_map = state.write().unwrap();
-    consumer_map.insert(client_id, tx);
-    drop(consumer_map);
+    let stream = station.create_output_stream(&OutputCodec::Mp3_64kbps);
 
-    (
-        ContentType::new("audio", "mpeg"),
-        ByteStream! {
-            yield NULL_MP3_FRAME.to_vec();
-            eprintln!("server: Frame MP3 null enviado");
-
-            'receive: loop {
-                match rx.recv() {
-                    Ok(chunk) => {
-                        yield Vec::from_iter(chunk.into_iter());
-                    }
-                    Err(e) => {
-                        eprintln!("server: Broadcast channel closed: {:?}", e);
-                        break 'receive;
-                    }
-                }
-            }
-
-            eprintln!("server: Closing stream")
-        },
-    )
+    stream.unwrap()
 }
 
 #[launch]
 fn rocket() -> _ {
-    let consumer_map = Arc::new(RwLock::new(HashMap::new()));
-    let output = output_encoder::AudioEncoder::new(OutputCodec::Mp3_64kbps, consumer_map.clone());
-
-    Cytoplasm::new(output);
+    let mut stations: StationMap = HashMap::new();
+    stations.insert(
+        "flintnsteel".to_string(),
+        Cytoplasm::new(&[OutputCodec::Mp3_64kbps]),
+    );
 
     rocket::build()
-        .manage(consumer_map)
-        .mount("/", routes![index, station])
+        .manage(stations)
+        .mount("/", routes![index, station_endpoint])
 }
 
 //fn main() {

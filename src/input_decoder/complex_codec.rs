@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{BufReader, Read},
-    process::{ChildStdout, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
 };
 
 use bytes::Bytes;
@@ -16,6 +16,7 @@ pub struct ComplexCodecFile {
     file_path: String,
     file_size: u64,
 
+    child: Child,
     reader: BufReader<ChildStdout>,
 }
 
@@ -51,6 +52,7 @@ impl ComplexCodecFile {
             file_path,
             file_size,
             reader,
+            child,
         }
     }
 }
@@ -86,5 +88,13 @@ impl Iterator for ComplexCodecFile {
             audio_length,
             buffer: Bytes::copy_from_slice(&buffer[..n]),
         });
+    }
+}
+
+impl Drop for ComplexCodecFile {
+    fn drop(&mut self) {
+        self.child
+            .kill()
+            .expect("complex_codec_file: ffmpeg não pôde ser fechado");
     }
 }

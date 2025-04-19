@@ -8,7 +8,7 @@ pub const CHANNEL_COUNT: u32 = 2;
 pub const SAMPLE_RATE: u32 = 44100;
 pub const BYTE_DEPTH: u32 = 2; //16bits
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AudioPacket {
     /**
      * Quanto tempo de áudio este quadro tem, em segundos
