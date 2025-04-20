@@ -68,7 +68,7 @@ pub struct AudioEncoder {
 }
 
 impl AudioEncoder {
-    pub fn new(output_codec: OutputCodec) -> AudioEncoder {
+    pub fn new(output_codec: &OutputCodec) -> AudioEncoder {
         let consumers: SinkMap = Arc::new(RwLock::new(HashMap::new()));
 
         let args: Vec<String> = ffmpeg_args(&output_codec);
