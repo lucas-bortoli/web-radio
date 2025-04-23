@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use bytes::Bytes;
 use cytoplasm::cytoplasm::Cytoplasm;
@@ -25,7 +25,7 @@ type StationMap = HashMap<String, Cytoplasm>;
 
 #[get("/station")]
 fn station_endpoint(state: &rocket::State<StationMap>) -> (ContentType, ByteStream![Bytes]) {
-    let station = state.get("flintnsteel").unwrap();
+    let station = state.get("diamondcityradio").unwrap();
     let stream = station
         .output_streams
         .get(&OutputCodec::Mp3_64kbps)
@@ -38,8 +38,11 @@ fn station_endpoint(state: &rocket::State<StationMap>) -> (ContentType, ByteStre
 fn rocket() -> _ {
     let mut stations: StationMap = HashMap::new();
     stations.insert(
-        "flintnsteel".to_string(),
-        Cytoplasm::new(&[OutputCodec::Mp3_64kbps]),
+        "diamondcityradio".to_string(),
+        Cytoplasm::new(
+            PathBuf::from("./DiamondCityRadio"),
+            &[OutputCodec::Mp3_64kbps],
+        ),
     );
 
     rocket::build()
