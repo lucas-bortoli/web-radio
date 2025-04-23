@@ -41,7 +41,18 @@ fn ffmpeg_args(output_codec: &OutputCodec) -> Vec<String> {
     ];
 
     args.append(&mut match output_codec {
-        OutputCodec::Mp3_64kbps => vec!["-b:a", "64k", "-f", "mp3"],
+        OutputCodec::Mp3_64kbps => vec![
+            "-b:a",
+            "128k",
+            "-f",
+            "mp3",
+            "-flush_packets",
+            "1",
+            "-write_xing",
+            "0",
+            "-id3v2_version",
+            "0",
+        ],
         OutputCodec::Ogg96kbps => vec!["-b:a", "96k", "-f", "ogg"],
         OutputCodec::Opus128kbps => vec!["-c:a", "libopus", "-b:a", "128k", "-f", "opus"],
     });
