@@ -1,20 +1,15 @@
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex},
     thread::{self},
     time::{Duration, Instant},
 };
 
-use bytes::Bytes;
-use rocket::{http::ContentType, response::stream::ByteStream};
-
 use crate::{
     input_decoder::input_audio_file::{self, AudioPacket},
-    output_encoder::{
-        audio_encoder::{AudioEncoder, OutputCodec},
-        null_frames::get_null_frame,
-    },
+    output_encoder::audio_encoder::{AudioEncoder, OutputCodec},
+    output_stream::OutputStream,
 };
 
 const FUCKALL_DURATION: Duration = Duration::from_millis(5);
@@ -23,66 +18,51 @@ const SETPOINT_LOW: usize = 5;
 
 pub struct Cytoplasm {
     encoders: Arc<Mutex<HashMap<OutputCodec, AudioEncoder>>>,
+    pub output_streams: Arc<HashMap<OutputCodec, Arc<OutputStream>>>,
 }
 
 impl Cytoplasm {
     pub fn new(station_directory: PathBuf, output_codecs: &[OutputCodec]) -> Cytoplasm {
         let buffer = Arc::new(Mutex::new(VecDeque::<AudioPacket>::new()));
-        let encoders = Self::init_encoders(&output_codecs);
+        let output_streams = Self::init_output_streams(&output_codecs);
+        let encoders = Self::init_encoders(&output_codecs, &output_streams);
 
         Self::init_decoder_thread(station_directory.clone(), buffer.clone());
         Self::init_encoder_thread(encoders.clone(), buffer.clone());
 
-        return Cytoplasm { encoders };
+        let output_streams_arc = Arc::new(output_streams);
+
+        Self::init_reporting_thread(output_streams_arc.clone());
+
+        return Cytoplasm {
+            output_streams: output_streams_arc,
+            encoders,
+        };
     }
 
-    pub fn create_output_stream(
-        &self,
-        codec: &OutputCodec,
-    ) -> Result<(ContentType, ByteStream![Vec<u8>]), &'static str> {
-        let encoders = self.encoders.lock().unwrap();
+    fn init_output_streams(codecs: &[OutputCodec]) -> HashMap<OutputCodec, Arc<OutputStream>> {
+        let mut streams = HashMap::new();
 
-        let stream = encoders.get(&codec);
-        if stream.is_none() {
-            return Err("cytoplasm: stream not found");
+        for codec in codecs {
+            let stream = OutputStream::new(codec.clone());
+            streams.insert(codec.clone(), Arc::new(stream));
         }
 
-        let (tx, rx) = mpsc::channel::<Bytes>();
-
-        stream.unwrap().register_consumer(tx);
-
-        let codec_owned = codec.to_owned();
-        Ok((
-            ContentType::new("audio", "mpeg"),
-            ByteStream! {
-                yield get_null_frame(&codec_owned).to_vec();
-                eprintln!("server: Frame MP3 null enviado");
-
-                'receive: loop {
-                    match rx.recv() {
-                        Ok(chunk) => {
-                            yield Vec::from_iter(chunk.into_iter());
-                        }
-                        Err(e) => {
-                            eprintln!("server: Broadcast channel closed: {:?}", e);
-                            break 'receive;
-                        }
-                    }
-                }
-
-                eprintln!("server: Closing stream")
-            },
-        ))
+        streams
     }
 
     /// cria e inicializa um encoder de áudio para cada codec de saída solicitado
-    fn init_encoders(codecs: &[OutputCodec]) -> Arc<Mutex<HashMap<OutputCodec, AudioEncoder>>> {
-        let mut map = HashMap::new();
+    fn init_encoders(
+        codecs: &[OutputCodec],
+        streams: &HashMap<OutputCodec, Arc<OutputStream>>,
+    ) -> Arc<Mutex<HashMap<OutputCodec, AudioEncoder>>> {
+        let mut encoders = HashMap::new();
         for codec in codecs {
-            let encoder = AudioEncoder::new(&codec);
-            map.insert(codec.clone(), encoder);
+            let output_stream = streams.get(codec).unwrap().clone();
+            let encoder = AudioEncoder::new(&codec, output_stream);
+            encoders.insert(codec.clone(), encoder);
         }
-        Arc::new(Mutex::new(map))
+        Arc::new(Mutex::new(encoders))
     }
 
     /// inicia a thread responsável por decodificar arquivos de áudio
@@ -189,6 +169,43 @@ impl Cytoplasm {
                         eprintln!("cytoplasm/e: Time underrun...");
                     }
                 }
+            }
+        });
+    }
+
+    fn init_reporting_thread(streams: Arc<HashMap<OutputCodec, Arc<OutputStream>>>) {
+        thread::spawn(move || {
+            let mut last_bytes = HashMap::new();
+            let mut last_time = Instant::now();
+
+            loop {
+                for (codec, stream) in streams.iter() {
+                    let mut bytes_total = 0usize;
+
+                    for (bytes, _) in stream.get_bandwidth_stats().values() {
+                        bytes_total += bytes;
+                    }
+
+                    let elapsed_secs = last_time.elapsed().as_secs_f64();
+                    let kbps = if let Some(prev_bytes) = last_bytes.get(codec) {
+                        let delta_bytes = bytes_total.saturating_sub(*prev_bytes) as f64;
+                        delta_bytes / (1024.0 * elapsed_secs)
+                    } else {
+                        0.0
+                    };
+
+                    last_bytes.insert(codec.clone(), bytes_total);
+
+                    eprintln!(
+                        "cytoplasm: stats: {} clientes, {:.2} KB enviados, {:.2} kb/s",
+                        stream.list_clients().len(),
+                        bytes_total as f64 / 1024.0,
+                        kbps
+                    );
+                }
+
+                last_time = Instant::now();
+                thread::sleep(Duration::from_secs(2));
             }
         });
     }

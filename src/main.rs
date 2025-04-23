@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use bytes::Bytes;
 use cytoplasm::cytoplasm::Cytoplasm;
 use output_encoder::audio_encoder::OutputCodec;
 use rocket::{
@@ -10,6 +11,7 @@ use rocket::{
 pub mod cytoplasm;
 pub mod input_decoder;
 pub mod output_encoder;
+pub mod output_stream;
 
 #[macro_use]
 extern crate rocket;
@@ -22,12 +24,14 @@ fn index() -> RawHtml<&'static [u8]> {
 type StationMap = HashMap<String, Cytoplasm>;
 
 #[get("/station")]
-fn station_endpoint(state: &rocket::State<StationMap>) -> (ContentType, ByteStream![Vec<u8>]) {
+fn station_endpoint(state: &rocket::State<StationMap>) -> (ContentType, ByteStream![Bytes]) {
     let station = state.get("flintnsteel").unwrap();
+    let stream = station
+        .output_streams
+        .get(&OutputCodec::Mp3_64kbps)
+        .unwrap();
 
-    let stream = station.create_output_stream(&OutputCodec::Mp3_64kbps);
-
-    stream.unwrap()
+    stream.create_consumer_http_stream()
 }
 
 #[launch]
