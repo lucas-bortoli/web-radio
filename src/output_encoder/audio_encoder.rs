@@ -1,17 +1,12 @@
 use bytes::Bytes;
 use std::{
-    collections::HashMap,
     io::{BufReader, BufWriter, Read, Write},
     process::{ChildStdin, Command, Stdio},
-    sync::{
-        mpsc::{self, Sender},
-        Arc, RwLock,
-    },
+    sync::Arc,
     thread,
 };
-use uuid::Uuid;
 
-use crate::input_decoder::input_audio_file::AudioPacket;
+use crate::{input_decoder::input_audio_file::AudioPacket, output_stream::OutputStream};
 
 pub const INPUT_CHANNEL_COUNT: u32 = 2;
 pub const INPUT_SAMPLE_RATE: u32 = 44100;
@@ -57,20 +52,15 @@ fn ffmpeg_args(output_codec: &OutputCodec) -> Vec<String> {
 }
 
 pub type ConsumerPacket = Bytes;
-type SinkMap = Arc<RwLock<HashMap<SinkId, mpsc::Sender<Bytes>>>>;
-type SinkId = uuid::Uuid;
 
 // singleton - um por estação
 pub struct AudioEncoder {
     encoder_in: BufWriter<ChildStdin>,
     child: std::process::Child,
-    consumers: Arc<RwLock<HashMap<SinkId, mpsc::Sender<Bytes>>>>, // TODO não armazenar isso no encoder, mas em outro lugar...
 }
 
 impl AudioEncoder {
-    pub fn new(output_codec: &OutputCodec) -> AudioEncoder {
-        let consumers: SinkMap = Arc::new(RwLock::new(HashMap::new()));
-
+    pub fn new(output_codec: &OutputCodec, output: Arc<OutputStream>) -> AudioEncoder {
         let args: Vec<String> = ffmpeg_args(&output_codec);
 
         println!("encoder: Parâmetros ffmpeg: {:?}", args);
@@ -85,7 +75,6 @@ impl AudioEncoder {
 
         if let Some(stdout) = child.stdout.take() {
             let mut stdout_reader = BufReader::new(stdout);
-            let consumer_map_encoder = consumers.clone();
             thread::spawn(move || {
                 println!("encoder: Thread de consumidor de áudio iniciada.");
 
@@ -104,20 +93,7 @@ impl AudioEncoder {
                             // então pagamos um custo fixo, uma vez só
                             let packet = Bytes::copy_from_slice(&buf[..n]);
 
-                            let mut disconnected_clients = vec![];
-
-                            for (client_id, tx) in consumer_map_encoder.read().unwrap().iter() {
-                                if let Err(e) = tx.send(packet.clone()) {
-                                    eprintln!("encoder: falha ao enviar para {}: {}", client_id, e);
-                                    disconnected_clients.push(client_id.clone());
-                                }
-                            }
-
-                            let mut encoder_write_guard = consumer_map_encoder.write().unwrap();
-                            for client_id in disconnected_clients {
-                                eprintln!("encoder: removendo {} da transmissão!", client_id);
-                                encoder_write_guard.remove(&client_id);
-                            }
+                            output.push(packet);
                         }
                     }
                 }
@@ -129,7 +105,6 @@ impl AudioEncoder {
 
         AudioEncoder {
             encoder_in: stdin_writer,
-            consumers,
             child: child,
         }
     }
@@ -142,12 +117,6 @@ impl AudioEncoder {
         // bypass do buffer do stdin; manda direto pro ffmpeg, já que áudio é em real-time e talvez não seja legal ter esse comportamento de buffering
         // ignoramos o Result propositalmente, não há nenhuma ação cabível a ser tomada se o buffer de stdin não pode ser flushado - meio que não importa
         let _ = self.encoder_in.flush();
-    }
-
-    pub fn register_consumer(&self, consumer: Sender<Bytes>) {
-        let receiver_id = Uuid::new_v4();
-        let mut consumers = self.consumers.write().unwrap();
-        consumers.insert(receiver_id, consumer);
     }
 }
 

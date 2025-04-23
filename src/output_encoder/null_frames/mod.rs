@@ -27,3 +27,11 @@ pub fn get_null_frame(codec: &OutputCodec) -> &'static [u8] {
         OutputCodec::Opus128kbps => include_bytes!("./opus.bin"),
     }
 }
+
+pub fn get_mime_type(codec: &OutputCodec) -> &'static str {
+    match codec {
+        OutputCodec::Mp3_64kbps => "mpeg",
+        OutputCodec::Ogg96kbps => "ogg",
+        OutputCodec::Opus128kbps => "opus",
+    }
+}
