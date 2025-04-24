@@ -1,2 +1,7 @@
 /target
 /diamond_city_radio
+
+*.mp3
+*.wav
+*.ogg
+*.opus

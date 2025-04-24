@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    cytoplasm::scripting::Scripting,
     input_decoder::input_audio_file::{self, AudioPacket},
     output_encoder::audio_encoder::{AudioEncoder, OutputCodec},
     output_stream::OutputStream,
@@ -18,6 +19,7 @@ const SETPOINT_LOW: usize = 5;
 
 pub struct Cytoplasm {
     encoders: Arc<Mutex<HashMap<OutputCodec, AudioEncoder>>>,
+    scripting: Arc<Mutex<Scripting>>,
     pub output_streams: Arc<HashMap<OutputCodec, Arc<OutputStream>>>,
 }
 
@@ -27,7 +29,10 @@ impl Cytoplasm {
         let output_streams = Self::init_output_streams(&output_codecs);
         let encoders = Self::init_encoders(&output_codecs, &output_streams);
 
-        Self::init_decoder_thread(station_directory.clone(), buffer.clone());
+        let script_file = station_directory.join("station.lua");
+        let scripting = Arc::new(Mutex::new(Scripting::new(&script_file)));
+
+        Self::init_decoder_thread(station_directory.clone(), scripting.clone(), buffer.clone());
         Self::init_encoder_thread(encoders.clone(), buffer.clone());
 
         let output_streams_arc = Arc::new(output_streams);
@@ -36,6 +41,7 @@ impl Cytoplasm {
 
         return Cytoplasm {
             output_streams: output_streams_arc,
+            scripting,
             encoders,
         };
     }
@@ -67,9 +73,20 @@ impl Cytoplasm {
 
     /// inicia a thread responsável por decodificar arquivos de áudio
     /// ela carrega trilhas conforme definidas e enfileira pacotes no buffer compartilhado
-    fn init_decoder_thread(station_directory: PathBuf, buffer: Arc<Mutex<VecDeque<AudioPacket>>>) {
+    fn init_decoder_thread(
+        station_directory: PathBuf,
+        scripting: Arc<Mutex<Scripting>>,
+        buffer: Arc<Mutex<VecDeque<AudioPacket>>>,
+    ) {
         thread::spawn(move || loop {
-            let next_track = station_directory.join("bicameral_mind.mp3");
+            let next_track = match scripting.lock().unwrap().invoke_pick_next() {
+                Some(t) => station_directory.join(t),
+                None => {
+                    eprintln!("cytoplasm/d: a estação não retornou uma próxima trilha");
+                    thread::sleep(FUCKALL_DURATION);
+                    continue;
+                }
+            };
 
             eprintln!(
                 "cytoplasm/d: abrindo arquivo: {}",
