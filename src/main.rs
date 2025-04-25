@@ -8,6 +8,7 @@ use rocket::{
     response::{content::RawHtml, stream::ByteStream},
 };
 
+pub mod audio_file_info;
 pub mod cytoplasm;
 pub mod input_decoder;
 pub mod output_encoder;
